@@ -1,92 +1,87 @@
+# somnologia_app/views.py
+
 from datetime import date, timedelta
-from django.db.models import Count # For aggregation in dashboard
+from django.db.models import Count
 
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from .models import Person, Dream
-from .serializers import PersonSerializer, DreamSerializer
+from .models import Person, Dream, Tag
+from .serializers import PersonSerializer, DreamSerializer, TagSerializer
 
 # -----------------------------------------------------
 # API ViewSets for CRUD Operations
 # -----------------------------------------------------
 
 class PersonViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint that allows persons to be viewed or edited.
-    Provides CRUD for the Person model.
-    """
     queryset = Person.objects.all()
     serializer_class = PersonSerializer
-    # You might add permissions here later, e.g.,
-    # permission_classes = [IsAuthenticated]
 
 
 class DreamViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint that allows dreams to be viewed or edited.
-    Provides CRUD for the Dream model.
-    """
     queryset = Dream.objects.all()
     serializer_class = DreamSerializer
-    # permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
-        """
-        Custom create logic for Dream model.
-        Handles setting dream_date to yesterday if not provided.
-        Handles associating persons by IDs.
-        """
-        # Get list of person IDs from request data, if provided
-        person_ids = self.request.data.get('persons', []) # Frontend might send a list of IDs
+        person_ids = self.request.data.get('persons', [])
+        tag_ids = self.request.data.get('tags', []) # <--- New: Get tag_ids from request data
 
-        # Set dream_date to yesterday if not provided in the request
         if 'dream_date' not in self.request.data or not self.request.data['dream_date']:
             serializer.validated_data['dream_date'] = date.today() - timedelta(days=1)
 
-        # Save the dream instance first, so we can add M2M relations
-        dream = serializer.save()
+        dream = serializer.save() # Save the dream first to get an ID
 
-        # Handle persons Many-to-Many relationship (if person_ids is a list of IDs)
-        # This part needs adjustment based on how your frontend will send persons data.
-        # Common patterns: sending a list of IDs, or nested objects (more complex for write).
-        # For now, let's assume 'persons' in request.data is a list of person IDs.
+        # Logic for Persons (already there)
         if person_ids:
-            # Ensure person_ids is iterable (e.g., list)
-            if isinstance(person_ids, str): # Handle comma-separated string if that's the input
+            # Ensure person_ids is a list of integers
+            if isinstance(person_ids, str):
                 person_ids = [int(p_id.strip()) for p_id in person_ids.split(',') if p_id.strip().isdigit()]
-            elif not isinstance(person_ids, list): # Ensure it's a list if not already
-                 person_ids = [person_ids] # Wrap single ID in a list
-
-            # Filter for existing Person objects
+            elif not isinstance(person_ids, list):
+                 person_ids = [person_ids] # Handle single ID case
             persons_to_add = Person.objects.filter(id__in=person_ids)
-            dream.persons.set(persons_to_add) # .set() replaces existing ManyToMany relations
+            dream.persons.set(persons_to_add)
 
-        dream.save() # Save again after adding persons (though .set() usually saves M2M immediately)
+        # New Logic for Tags
+        if tag_ids:
+            # Ensure tag_ids is a list of integers
+            if isinstance(tag_ids, str):
+                tag_ids = [int(t_id.strip()) for t_id in tag_ids.split(',') if t_id.strip().isdigit()]
+            elif not isinstance(tag_ids, list):
+                tag_ids = [tag_ids] # Handle single ID case
+            tags_to_add = Tag.objects.filter(id__in=tag_ids)
+            dream.tags.set(tags_to_add) # <--- Set the tags
+
+        dream.save() # Save again if any ManyToMany fields were set after initial save
 
     def perform_update(self, serializer):
-        """
-        Custom update logic for Dream model.
-        Handles updating persons by IDs.
-        """
-        # Get list of person IDs from request data, if provided for update
-        person_ids = self.request.data.get('persons', None) # Use None to distinguish if key is present but empty
+        person_ids = self.request.data.get('persons', None)
+        tag_ids = self.request.data.get('tags', None) # <--- New: Get tag_ids from request data
 
-        # Update the dream instance
-        dream = serializer.save()
+        dream = serializer.save() # Save the dream first
 
-        # Only update persons if the 'persons' key was explicitly sent in the request
-        if person_ids is not None:
+        # Logic for Persons (already there)
+        if person_ids is not None: # Use 'is not None' to allow clearing persons by sending empty list
             if isinstance(person_ids, str):
                 person_ids = [int(p_id.strip()) for p_id in person_ids.split(',') if p_id.strip().isdigit()]
             elif not isinstance(person_ids, list):
                  person_ids = [person_ids]
-
             persons_to_set = Person.objects.filter(id__in=person_ids)
-            dream.persons.set(persons_to_set) # .set() replaces existing ManyToMany relations
+            dream.persons.set(persons_to_set)
 
-        dream.save() # Save again after updating persons
+        # New Logic for Tags
+        if tag_ids is not None: # Use 'is not None' to allow clearing tags by sending empty list
+            if isinstance(tag_ids, str):
+                tag_ids = [int(t_id.strip()) for t_id in tag_ids.split(',') if t_id.strip().isdigit()]
+            elif not isinstance(tag_ids, list):
+                tag_ids = [tag_ids]
+            tags_to_set = Tag.objects.filter(id__in=tag_ids)
+            dream.tags.set(tags_to_set) # <--- Set the tags
+
+        dream.save() # Save again if any ManyToMany fields were set after initial save
+
+
+# ... (rest of dashboard_data_api and interpret_dream_api remain the same for now) ...
 
 
 # -----------------------------------------------------

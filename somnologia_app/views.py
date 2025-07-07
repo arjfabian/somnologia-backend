@@ -1,5 +1,3 @@
-# somnologia_app/views.py
-
 from datetime import date, timedelta
 from django.db.models import Count
 
@@ -9,80 +7,98 @@ from rest_framework.response import Response
 
 from .models import Person, Dream, Tag
 from .serializers import PersonSerializer, DreamSerializer, TagSerializer
+from .plugins.interpreters.artemidorus import artemidorus_interpreter
 
 # -----------------------------------------------------
 # API ViewSets for CRUD Operations
 # -----------------------------------------------------
 
 class PersonViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for handling CRUD operations on Person objects.
+    """
     queryset = Person.objects.all()
     serializer_class = PersonSerializer
 
 
 class DreamViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for handling CRUD operations on Dream objects.
+    Includes custom logic for handling Many-to-Many relationships with Persons and Tags,
+    and setting a default dream_date if not provided.
+    """
     queryset = Dream.objects.all()
     serializer_class = DreamSerializer
 
-    def perform_create(self, serializer):
-        person_ids = self.request.data.get('persons', [])
-        tag_ids = self.request.data.get('tags', []) # <--- New: Get tag_ids from request data
+    def _parse_ids(self, ids_data):
+        """
+        Helper method to parse IDs from request data, handling string or list formats.
+        Returns a list of integers, or None if the input was None (allowing for explicit clearing/no change).
+        """
+        if ids_data is None:
+            return None # Allows explicit None to mean "no change to this M2M field"
+        if isinstance(ids_data, str):
+            # Split by comma, strip whitespace, filter out empty strings, and convert to int
+            return [int(item.strip()) for item in ids_data.split(',') if item.strip().isdigit()]
+        elif isinstance(ids_data, (list, tuple)):
+            # Ensure all items in the list/tuple are integers, filter out non-integers
+            return [int(item) for item in ids_data if isinstance(item, (int, str)) and str(item).strip().isdigit()]
+        return [] # Default to empty list if format is unexpected but not None
 
-        if 'dream_date' not in self.request.data or not self.request.data['dream_date']:
+
+    def perform_create(self, serializer):
+        """
+        Custom creation logic for Dream instances.
+        - Sets a default `dream_date` if not provided in the request.
+        - Handles Many-to-Many relationships for `persons` and `tags` using the `_parse_ids` helper.
+        """
+        # Get data, defaulting to empty list if not present, to ensure _parse_ids handles it
+        person_ids_raw = self.request.data.get('persons', [])
+        tag_ids_raw = self.request.data.get('tags', [])
+
+        # Set default dream_date if it's not provided or is empty
+        if not serializer.validated_data.get('dream_date'):
             serializer.validated_data['dream_date'] = date.today() - timedelta(days=1)
 
-        dream = serializer.save() # Save the dream first to get an ID
+        dream = serializer.save() # Save the dream instance first to get an ID for M2M relationships
 
-        # Logic for Persons (already there)
-        if person_ids:
-            # Ensure person_ids is a list of integers
-            if isinstance(person_ids, str):
-                person_ids = [int(p_id.strip()) for p_id in person_ids.split(',') if p_id.strip().isdigit()]
-            elif not isinstance(person_ids, list):
-                 person_ids = [person_ids] # Handle single ID case
-            persons_to_add = Person.objects.filter(id__in=person_ids)
+        # Parse and set Persons Many-to-Many
+        parsed_person_ids = self._parse_ids(person_ids_raw)
+        if parsed_person_ids is not None: # Check if data for persons was explicitly provided (e.g., an empty list [])
+            persons_to_add = Person.objects.filter(id__in=parsed_person_ids)
             dream.persons.set(persons_to_add)
 
-        # New Logic for Tags
-        if tag_ids:
-            # Ensure tag_ids is a list of integers
-            if isinstance(tag_ids, str):
-                tag_ids = [int(t_id.strip()) for t_id in tag_ids.split(',') if t_id.strip().isdigit()]
-            elif not isinstance(tag_ids, list):
-                tag_ids = [tag_ids] # Handle single ID case
-            tags_to_add = Tag.objects.filter(id__in=tag_ids)
-            dream.tags.set(tags_to_add) # <--- Set the tags
+        # Parse and set Tags Many-to-Many
+        parsed_tag_ids = self._parse_ids(tag_ids_raw)
+        if parsed_tag_ids is not None: # Check if data for tags was explicitly provided
+            tags_to_add = Tag.objects.filter(id__in=parsed_tag_ids)
+            dream.tags.set(tags_to_add)
 
-        dream.save() # Save again if any ManyToMany fields were set after initial save
 
     def perform_update(self, serializer):
-        person_ids = self.request.data.get('persons', None)
-        tag_ids = self.request.data.get('tags', None) # <--- New: Get tag_ids from request data
+        """
+        Custom update logic for Dream instances.
+        - Handles Many-to-Many relationships for `persons` and `tags` using the `_parse_ids` helper.
+        - Allows explicit clearing of M2M relationships by sending an empty list,
+          or leaving them unchanged by sending `null` or omitting the field.
+        """
+        # Use None as default for get() to distinguish between field not present vs. empty list
+        person_ids_raw = self.request.data.get('persons', None)
+        tag_ids_raw = self.request.data.get('tags', None)
 
-        dream = serializer.save() # Save the dream first
+        dream = serializer.save() # Save the dream instance first
 
-        # Logic for Persons (already there)
-        if person_ids is not None: # Use 'is not None' to allow clearing persons by sending empty list
-            if isinstance(person_ids, str):
-                person_ids = [int(p_id.strip()) for p_id in person_ids.split(',') if p_id.strip().isdigit()]
-            elif not isinstance(person_ids, list):
-                 person_ids = [person_ids]
-            persons_to_set = Person.objects.filter(id__in=person_ids)
+        # Parse and set Persons Many-to-Many
+        parsed_person_ids = self._parse_ids(person_ids_raw)
+        if parsed_person_ids is not None: # Only update if the field was explicitly provided in the request
+            persons_to_set = Person.objects.filter(id__in=parsed_person_ids)
             dream.persons.set(persons_to_set)
 
-        # New Logic for Tags
-        if tag_ids is not None: # Use 'is not None' to allow clearing tags by sending empty list
-            if isinstance(tag_ids, str):
-                tag_ids = [int(t_id.strip()) for t_id in tag_ids.split(',') if t_id.strip().isdigit()]
-            elif not isinstance(tag_ids, list):
-                tag_ids = [tag_ids]
-            tags_to_set = Tag.objects.filter(id__in=tag_ids)
-            dream.tags.set(tags_to_set) # <--- Set the tags
-
-        dream.save() # Save again if any ManyToMany fields were set after initial save
-
-
-# ... (rest of dashboard_data_api and interpret_dream_api remain the same for now) ...
-
+        # Parse and set Tags Many-to-Many
+        parsed_tag_ids = self._parse_ids(tag_ids_raw)
+        if parsed_tag_ids is not None: # Only update if the field was explicitly provided in the request
+            tags_to_set = Tag.objects.filter(id__in=parsed_tag_ids)
+            dream.tags.set(tags_to_set)
 
 # -----------------------------------------------------
 # Custom API Endpoints (Function-Based Views)
@@ -94,18 +110,15 @@ def dashboard_data_api(request):
     API endpoint for aggregated dashboard data:
     - Latest 3 dream entries.
     - List of persons with their dream counts.
+    - Chart data for persons and their dream counts.
     """
     # Get latest 3 dream entries (by entry_created_at to reflect recent additions)
     latest_dreams = Dream.objects.all().order_by('-entry_created_at')[:3]
     latest_dreams_serializer = DreamSerializer(latest_dreams, many=True)
 
-    # Get persons with their dream counts
-    # annotate(qty_dreams=Count('dream')) adds a 'qty_dreams' attribute to each Person object
+    # Get persons with their dream counts, efficiently using annotation
     persons_with_count = Person.objects.annotate(qty_dreams=Count('dream')).order_by('name')
 
-    # Serialize persons. We'll add 'qty_dreams' to PersonSerializer fields temporarily for this.
-    # Or, we can manually construct the response if PersonSerializer shouldn't always have qty_dreams.
-    # For simplicity, let's create a custom list for the response:
     persons_data = []
     for person in persons_with_count:
         persons_data.append({
@@ -130,11 +143,14 @@ def dashboard_data_api(request):
 @api_view(['POST'])
 def interpret_dream_api(request):
     """
-    API endpoint to send a dream description for AI interpretation.
+    API endpoint to send a dream description for AI interpretation and
+    to suggest persons, tags, and a generated image based on the content.
     Accepts a POST request with 'description' in the body.
-    Returns the AI-generated interpretation.
+    Returns interpretation, suggested persons (full objects),
+    suggested new person names, suggested tags (full objects),
+    and a generated image URL (from AI, or placeholder).
     """
-    dream_description = request.data.get('description')
+    dream_description = request.data.get('description', '')
 
     if not dream_description:
         return Response(
@@ -142,37 +158,29 @@ def interpret_dream_api(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # TODO: Integrate your actual AI model here for interpretation.
-    # This is currently a placeholder.
-    # Example:
-    # ai_model_response = your_ai_model.interpret(dream_description)
-    # interpretation_text = ai_model_response.get('interpretation_text', 'No interpretation available.')
+    # Call the instantiated interpreter for analysis
+    analysis_results = artemidorus_interpreter.analyze_dream_description(dream_description)
 
-    # Placeholder interpretation
-    interpretation_text = f"AI Interpretation for '{dream_description[:100]}...': This dream suggests deep subconscious processing related to [themes like freedom, anxiety, transformation, etc.]."
+    # Fetch and serialize full Person and Tag objects based on suggested IDs
+    suggested_persons_qs = Person.objects.filter(id__in=analysis_results['suggested_person_ids'])
+    suggested_persons_data = PersonSerializer(suggested_persons_qs, many=True).data
 
-    # Optional: You might want to save this interpretation back to a Dream model if the dream exists
-    # dream_id = request.data.get('dream_id')
-    # if dream_id:
-    #     try:
-    #         dream = Dream.objects.get(id=dream_id)
-    #         dream.ai_interpretation = interpretation_text
-    #         dream.save()
-    #     except Dream.DoesNotExist:
-    #         pass # Or return an error if dream_id is mandatory
+    suggested_tags_qs = Tag.objects.filter(id__in=analysis_results['suggested_tag_ids'])
+    suggested_tags_data = TagSerializer(suggested_tags_qs, many=True).data
 
-    return Response(
-        {'interpretation': interpretation_text},
-        status=status.HTTP_200_OK
+    # Call the interpreter for image generation, passing both description and interpretation
+    generated_image_url = artemidorus_interpreter.generate_dream_image(
+        dream_description=dream_description,
+        interpretation=analysis_results['interpretation']
     )
 
-# -----------------------------------------------------
-# Helper for media file serving in development (NOT for production)
-# -----------------------------------------------------
-from django.conf import settings
-from django.conf.urls.static import static
-
-# This is not a view but a helper for main urls.py (we'll move it there)
-# It ensures media files are served in development mode.
-# In production, a web server like Nginx/Apache handles this.
-# For now, just note it's related to serving 'photo' fields.
+    return Response(
+        {
+            'interpretation': analysis_results['interpretation'],
+            'suggested_persons': suggested_persons_data,
+            'suggested_new_person_names': analysis_results['suggested_new_person_names'],
+            'suggested_tags': suggested_tags_data,
+            'generated_image_url': generated_image_url
+        },
+        status=status.HTTP_200_OK
+    )

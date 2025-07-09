@@ -43,9 +43,11 @@ INSTALLED_APPS = [
 
     # Main app
     'somnologia_app',
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware', # To allow communication with the frontend
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -126,3 +128,15 @@ STATIC_URL = '/static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# CORS Headers settings
+# We can either allow all origins (early development) or specifically for the frontend URL.
+CORS_ALLOW_ALL_ORIGINS = True
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:5173",
+#     "http://127.0.0.1:5173",
+# ]
+# Both localhost and 127.0.0.1 might be needed depending on how the browser resolves the URL.
+
+# If you also need to allow credentials (e.g., cookies, authorization headers)
+CORS_ALLOW_CREDENTIALS = True

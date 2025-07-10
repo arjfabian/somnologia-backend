@@ -2,6 +2,9 @@
 
 import re
 from django.contrib.staticfiles.storage import staticfiles_storage
+from django.http import HttpRequest
+from typing import Optional # For type hinting
+
 from ...models import Person, Tag
 from .base import DreamInterpreter
 
@@ -71,14 +74,23 @@ class ArtemidorusInterpreter(DreamInterpreter):
 
         return results
     
-    def generate_dream_image(self, dream_description: str, interpretation: str = None) -> str | None:
+    def generate_dream_image(self, dream_description: str, interpretation: str = None, request: Optional[HttpRequest] = None) -> str | None:
         """
         Artemidorus Interpreter does not generate actual images.
         Returns a placeholder image URL from static files for development/display purposes.
+        Accepts an optional HttpRequest object to build an absolute URL.
         """
-        placeholder_image_url = staticfiles_storage.url('images/dream_placeholder.png')
-        return placeholder_image_url
+        placeholder_image_path = staticfiles_storage.url('images/dream_placeholder.png')
         
+        if request:
+            # Construct the full absolute URL using the request object
+            full_image_url = request.build_absolute_uri(placeholder_image_path)
+        else:
+            # Fallback for cases where request might not be available (e.g., in management commands)
+            # This should ideally point to your production static server in a production setting
+            full_image_url = f"http://127.0.0.1:8000{placeholder_image_path}" # Keep for local dev fallback
+        
+        return full_image_url
 
 # Instantiate the interpreter for use.
 artemidorus_interpreter = ArtemidorusInterpreter()

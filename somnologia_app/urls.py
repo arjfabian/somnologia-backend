@@ -20,6 +20,7 @@ router = DefaultRouter()
 # - /api/v1/persons/ (list and create)
 # - /api/v1/persons/{id}/ (retrieve, update, and delete)
 router.register(r'persons', views.PersonViewSet)
+router.register(r'tags', views.TagViewSet)
 router.register(r'dreams', views.DreamViewSet)
 
 # Define the URL patterns for the Somnologia API.

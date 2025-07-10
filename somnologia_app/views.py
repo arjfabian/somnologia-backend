@@ -20,6 +20,12 @@ class PersonViewSet(viewsets.ModelViewSet):
     queryset = Person.objects.all()
     serializer_class = PersonSerializer
 
+class TagViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for handling CRUD operations on Tag objects.
+    """
+    queryset = Tag.objects.all()
+    serializer_class = TagSerializer
 
 class DreamViewSet(viewsets.ModelViewSet):
     """
